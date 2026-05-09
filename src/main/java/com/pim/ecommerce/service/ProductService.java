@@ -137,13 +137,25 @@ public class ProductService {
     }
 
     @Transactional(readOnly = true)
-    public List<String> findCategories() {
-        return productRepository.findActiveCategories();
+    public List<String> findCategories(String categoryGroup) {
+        String normalizedCategoryGroup = normalizeFilter(categoryGroup);
+
+        if (normalizedCategoryGroup == null) {
+            return productRepository.findActiveCategories();
+        }
+
+        return productRepository.findActiveCategoriesByCategoryGroup(normalizedCategoryGroup);
     }
 
     @Transactional(readOnly = true)
-    public List<String> findAllCategoriesForAdmin() {
-        return productRepository.findAllCategories();
+    public List<String> findAllCategoriesForAdmin(String categoryGroup) {
+        String normalizedCategoryGroup = normalizeFilter(categoryGroup);
+
+        if (normalizedCategoryGroup == null) {
+            return productRepository.findAllCategories();
+        }
+
+        return productRepository.findAllCategoriesByCategoryGroup(normalizedCategoryGroup);
     }
 
     @Transactional(readOnly = true)

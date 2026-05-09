@@ -210,4 +210,29 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             ORDER BY p.categoryGroup ASC
             """)
     List<String> findAllCategoryGroups();
+
+    @Query("""
+        SELECT DISTINCT p.category
+        FROM Product p
+        WHERE p.active = true
+          AND p.category IS NOT NULL
+          AND TRIM(p.category) <> ''
+          AND LOWER(p.categoryGroup) = :categoryGroup
+        ORDER BY p.category ASC
+        """)
+    List<String> findActiveCategoriesByCategoryGroup(
+            @Param("categoryGroup") String categoryGroup
+    );
+
+    @Query("""
+        SELECT DISTINCT p.category
+        FROM Product p
+        WHERE p.category IS NOT NULL
+          AND TRIM(p.category) <> ''
+          AND LOWER(p.categoryGroup) = :categoryGroup
+        ORDER BY p.category ASC
+        """)
+    List<String> findAllCategoriesByCategoryGroup(
+            @Param("categoryGroup") String categoryGroup
+    );
 }

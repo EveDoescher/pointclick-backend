@@ -5,9 +5,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.text.Normalizer;
 import java.util.Locale;
 import java.util.Set;
@@ -34,67 +37,23 @@ public class FileStorageService {
             "gif"
     );
 
-    @Value("${app.upload.dir:uploads}")
-    private String uploadDir;
+    @Value("${supabase.url}")
+    private String supabaseUrl;
+
+    @Value("${supabase.service-role-key}")
+    private String serviceRoleKey;
+
+    @Value("${supabase.storage.bucket:product-images}")
+    private String bucket;
+
+    private final HttpClient httpClient = HttpClient.newHttpClient();
 
     public String storeProductImage(MultipartFile file) {
-        validateImage(file);
-
-        try {
-            Path productUploadPath = Path.of(uploadDir)
-                    .toAbsolutePath()
-                    .normalize()
-                    .resolve("products");
-
-            Files.createDirectories(productUploadPath);
-
-            String originalFilename = file.getOriginalFilename();
-            String extension = extractExtension(originalFilename);
-            String safeBaseName = sanitizeBaseName(originalFilename);
-            String filename = UUID.randomUUID() + "-" + safeBaseName + "." + extension;
-
-            Path targetPath = productUploadPath.resolve(filename).normalize();
-
-            if (!targetPath.startsWith(productUploadPath)) {
-                throw new IllegalArgumentException("Nome de arquivo inválido");
-            }
-
-            file.transferTo(targetPath);
-
-            return "/uploads/products/" + filename;
-        } catch (IOException ex) {
-            throw new IllegalArgumentException("Não foi possível salvar a imagem do produto");
-        }
+        return uploadImage(file, "products", "produto");
     }
 
     public String storeReviewImage(MultipartFile file) {
-        validateImage(file);
-
-        try {
-            Path reviewUploadPath = Path.of(uploadDir)
-                    .toAbsolutePath()
-                    .normalize()
-                    .resolve("reviews");
-
-            Files.createDirectories(reviewUploadPath);
-
-            String originalFilename = file.getOriginalFilename();
-            String extension = extractExtension(originalFilename);
-            String safeBaseName = sanitizeBaseName(originalFilename);
-            String filename = UUID.randomUUID() + "-" + safeBaseName + "." + extension;
-
-            Path targetPath = reviewUploadPath.resolve(filename).normalize();
-
-            if (!targetPath.startsWith(reviewUploadPath)) {
-                throw new IllegalArgumentException("Nome de arquivo inválido");
-            }
-
-            file.transferTo(targetPath);
-
-            return "/uploads/reviews/" + filename;
-        } catch (IOException ex) {
-            throw new IllegalArgumentException("Não foi possível salvar a imagem da avaliação");
-        }
+        return uploadImage(file, "reviews", "avaliacao");
     }
 
     public void deletePublicFile(String publicUrl) {
@@ -102,29 +61,80 @@ public class FileStorageService {
             return;
         }
 
-        if (!publicUrl.startsWith("/uploads/products/")) {
+        String publicPrefix = buildPublicPrefix();
+
+        if (!publicUrl.startsWith(publicPrefix)) {
             return;
         }
 
-        String filename = publicUrl.substring("/uploads/products/".length());
+        String objectPath = publicUrl.substring(publicPrefix.length());
 
-        if (filename.isBlank() || filename.contains("/") || filename.contains("\\")) {
+        if (objectPath.isBlank() || objectPath.contains("..")) {
             return;
         }
 
         try {
-            Path productUploadPath = Path.of(uploadDir)
-                    .toAbsolutePath()
-                    .normalize()
-                    .resolve("products");
+            String encodedPath = encodePath(objectPath);
 
-            Path filePath = productUploadPath.resolve(filename).normalize();
+            URI deleteUri = URI.create(
+                    normalizeSupabaseUrl() + "/storage/v1/object/" + bucket + "/" + encodedPath
+            );
 
-            if (filePath.startsWith(productUploadPath)) {
-                Files.deleteIfExists(filePath);
-            }
-        } catch (IOException ignored) {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(deleteUri)
+                    .header("Authorization", "Bearer " + serviceRoleKey)
+                    .header("apikey", serviceRoleKey)
+                    .DELETE()
+                    .build();
+
+            httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        } catch (Exception ignored) {
             // Falha ao apagar arquivo antigo não deve quebrar operação principal.
+        }
+    }
+
+    private String uploadImage(MultipartFile file, String folder, String fallbackBaseName) {
+        validateImage(file);
+        validateSupabaseConfig();
+
+        try {
+            String originalFilename = file.getOriginalFilename();
+            String extension = extractExtension(originalFilename);
+            String safeBaseName = sanitizeBaseName(originalFilename, fallbackBaseName);
+
+            String filename = UUID.randomUUID() + "-" + safeBaseName + "." + extension;
+            String objectPath = folder + "/" + filename;
+            String encodedPath = encodePath(objectPath);
+
+            URI uploadUri = URI.create(
+                    normalizeSupabaseUrl() + "/storage/v1/object/" + bucket + "/" + encodedPath
+            );
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(uploadUri)
+                    .header("Authorization", "Bearer " + serviceRoleKey)
+                    .header("apikey", serviceRoleKey)
+                    .header("Content-Type", resolveContentType(file))
+                    .header("x-upsert", "false")
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(file.getBytes()))
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(
+                    request,
+                    HttpResponse.BodyHandlers.ofString()
+            );
+
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new IllegalArgumentException(
+                        "Não foi possível enviar a imagem para o Supabase Storage"
+                );
+            }
+
+            return buildPublicPrefix() + objectPath;
+        } catch (IllegalArgumentException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new IllegalArgumentException("Não foi possível salvar a imagem");
         }
     }
 
@@ -150,6 +160,20 @@ public class FileStorageService {
         }
     }
 
+    private void validateSupabaseConfig() {
+        if (supabaseUrl == null || supabaseUrl.isBlank()) {
+            throw new IllegalArgumentException("SUPABASE_URL não configurada");
+        }
+
+        if (serviceRoleKey == null || serviceRoleKey.isBlank()) {
+            throw new IllegalArgumentException("SUPABASE_SERVICE_ROLE_KEY não configurada");
+        }
+
+        if (bucket == null || bucket.isBlank()) {
+            throw new IllegalArgumentException("SUPABASE_STORAGE_BUCKET não configurado");
+        }
+    }
+
     private String extractExtension(String filename) {
         if (filename == null || filename.isBlank() || !filename.contains(".")) {
             throw new IllegalArgumentException("Arquivo sem extensão válida");
@@ -166,9 +190,9 @@ public class FileStorageService {
         return extension;
     }
 
-    private String sanitizeBaseName(String filename) {
+    private String sanitizeBaseName(String filename, String fallback) {
         if (filename == null || filename.isBlank()) {
-            return "produto";
+            return fallback;
         }
 
         String baseName = filename;
@@ -187,9 +211,42 @@ public class FileStorageService {
                 .replaceAll("^-|-$", "");
 
         if (sanitized.isBlank()) {
-            return "produto";
+            return fallback;
         }
 
         return sanitized;
+    }
+
+    private String resolveContentType(MultipartFile file) {
+        String contentType = file.getContentType();
+
+        if (contentType == null || contentType.isBlank()) {
+            return "application/octet-stream";
+        }
+
+        return contentType;
+    }
+
+    private String normalizeSupabaseUrl() {
+        return supabaseUrl.replaceAll("/+$", "");
+    }
+
+    private String buildPublicPrefix() {
+        return normalizeSupabaseUrl() + "/storage/v1/object/public/" + bucket + "/";
+    }
+
+    private String encodePath(String path) {
+        String[] parts = path.split("/");
+        StringBuilder encoded = new StringBuilder();
+
+        for (int i = 0; i < parts.length; i++) {
+            if (i > 0) {
+                encoded.append("/");
+            }
+
+            encoded.append(URLEncoder.encode(parts[i], StandardCharsets.UTF_8));
+        }
+
+        return encoded.toString();
     }
 }

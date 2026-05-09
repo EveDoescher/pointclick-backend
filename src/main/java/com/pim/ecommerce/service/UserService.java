@@ -11,6 +11,8 @@ import com.pim.ecommerce.dto.request.UpdateMyProfileRequest;
 import com.pim.ecommerce.dto.request.UpdateUserRequest;
 import com.pim.ecommerce.dto.response.AddressResponse;
 import com.pim.ecommerce.dto.response.UserResponse;
+import com.pim.ecommerce.integration.viacep.ViaCepClient;
+import com.pim.ecommerce.integration.viacep.ViaCepResponse;
 import com.pim.ecommerce.security.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -34,6 +36,7 @@ public class UserService {
     private final PasswordEncoder passwordEncoder;
     private final CurrentUserService currentUserService;
     private final RefreshTokenService refreshTokenService;
+    private final ViaCepClient viaCepClient;
     private static final long MAX_AVATAR_SIZE_BYTES = 5 * 1024 * 1024;
     private static final Path USER_AVATAR_UPLOAD_DIR = Path.of("uploads", "users", "avatars");
 
@@ -302,12 +305,16 @@ public class UserService {
     }
 
     private void applyAddressUpdate(Address address, UpdateAddressRequest request) {
-        address.setCep(normalizeCep(request.cep()));
+        String normalizedCep = normalizeCep(request.cep());
+
+        ViaCepResponse viaCepResponse = viaCepClient.getAddressByCep(normalizedCep);
+
+        address.setCep(normalizedCep);
         address.setStreet(request.street().trim());
         address.setNumber(request.number().trim());
         address.setComplement(normalizeOptionalText(request.complement()));
-        address.setCity(request.city().trim());
-        address.setState(request.state().trim().toUpperCase());
+        address.setCity(viaCepResponse.localidade().trim());
+        address.setState(viaCepResponse.uf().trim().toUpperCase());
     }
 
     private UserResponse toResponse(User user) {

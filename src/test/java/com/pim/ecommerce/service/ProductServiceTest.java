@@ -389,18 +389,50 @@ class ProductServiceTest {
     }
 
     @Test
-    void shouldDelegateCategoryBrandAndGroupLookups() {
+    void shouldDelegateCategoryBrandAndGroupLookupsWithoutCategoryGroupFilter() {
         when(productRepository.findActiveCategories()).thenReturn(List.of("Teclados"));
         when(productRepository.findAllCategories()).thenReturn(List.of("Mouses", "Teclados"));
         when(productRepository.findActiveCategoryGroups()).thenReturn(List.of("Periféricos"));
         when(productRepository.findAllCategoryGroups()).thenReturn(List.of("Computadores", "Periféricos"));
         when(productRepository.findActiveBrands()).thenReturn(List.of("PointClick"));
 
-        assertThat(productService.findCategories()).containsExactly("Teclados");
-        assertThat(productService.findAllCategoriesForAdmin()).containsExactly("Mouses", "Teclados");
+        assertThat(productService.findCategories(null)).containsExactly("Teclados");
+        assertThat(productService.findAllCategoriesForAdmin(null)).containsExactly("Mouses", "Teclados");
         assertThat(productService.findCategoryGroups()).containsExactly("Periféricos");
         assertThat(productService.findAllCategoryGroupsForAdmin()).containsExactly("Computadores", "Periféricos");
         assertThat(productService.findBrands()).containsExactly("PointClick");
+
+        verify(productRepository).findActiveCategories();
+        verify(productRepository).findAllCategories();
+        verify(productRepository).findActiveCategoryGroups();
+        verify(productRepository).findAllCategoryGroups();
+        verify(productRepository).findActiveBrands();
+    }
+
+    @Test
+    void shouldFindCategoriesByCategoryGroupWhenFilterIsProvided() {
+        when(productRepository.findActiveCategoriesByCategoryGroup("periféricos"))
+                .thenReturn(List.of("Mouses", "Teclados"));
+
+        List<String> response = productService.findCategories(" Periféricos ");
+
+        assertThat(response).containsExactly("Mouses", "Teclados");
+
+        verify(productRepository).findActiveCategoriesByCategoryGroup("periféricos");
+        verify(productRepository, never()).findActiveCategories();
+    }
+
+    @Test
+    void shouldFindAllCategoriesForAdminByCategoryGroupWhenFilterIsProvided() {
+        when(productRepository.findAllCategoriesByCategoryGroup("computadores e mobile"))
+                .thenReturn(List.of("Notebooks", "Smartphones", "Tablets"));
+
+        List<String> response = productService.findAllCategoriesForAdmin(" Computadores e Mobile ");
+
+        assertThat(response).containsExactly("Notebooks", "Smartphones", "Tablets");
+
+        verify(productRepository).findAllCategoriesByCategoryGroup("computadores e mobile");
+        verify(productRepository, never()).findAllCategories();
     }
 
     private UpdateProductRequest mutationUpdateRequest(BigDecimal price, Integer stockQuantity, Boolean active) {

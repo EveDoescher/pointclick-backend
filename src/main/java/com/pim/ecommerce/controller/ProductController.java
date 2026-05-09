@@ -163,8 +163,10 @@ public class ProductController {
             description = "Retorna categorias distintas de produtos ativos."
     )
     @GetMapping("/categories")
-    public List<String> findCategories() {
-        return productService.findCategories();
+    public List<String> findCategories(
+            @RequestParam(required = false) String categoryGroup
+    ) {
+        return productService.findCategories(categoryGroup);
     }
 
     @Operation(
@@ -181,8 +183,10 @@ public class ProductController {
             description = "Retorna categorias distintas considerando produtos ativos e inativos."
     )
     @GetMapping("/admin/categories")
-    public List<String> findAllCategoriesForAdmin() {
-        return productService.findAllCategoriesForAdmin();
+    public List<String> findAllCategoriesForAdmin(
+            @RequestParam(required = false) String categoryGroup
+    ) {
+        return productService.findAllCategoriesForAdmin(categoryGroup);
     }
 
     @Operation(
