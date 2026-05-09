@@ -1,6 +1,5 @@
 package com.pim.ecommerce.service;
 
-
 import com.pim.ecommerce.domain.entity.Address;
 import com.pim.ecommerce.domain.entity.User;
 import com.pim.ecommerce.domain.entity.enums.UserRole;
@@ -21,12 +20,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.util.Locale;
-import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -36,9 +29,9 @@ public class UserService {
     private final PasswordEncoder passwordEncoder;
     private final CurrentUserService currentUserService;
     private final RefreshTokenService refreshTokenService;
+    private final FileStorageService fileStorageService;
     private final ViaCepClient viaCepClient;
-    private static final long MAX_AVATAR_SIZE_BYTES = 5 * 1024 * 1024;
-    private static final Path USER_AVATAR_UPLOAD_DIR = Path.of("uploads", "users", "avatars");
+
 
     @Transactional
     public UserResponse create(CreateUserRequest request) {
@@ -185,7 +178,11 @@ public class UserService {
 
         User user = findActiveUserById(currentUserId);
 
-        String avatarUrl = storeAvatarFile(file, user.getId());
+        if (user.getAvatarUrl() != null && !user.getAvatarUrl().isBlank()) {
+            fileStorageService.deletePublicFile(user.getAvatarUrl());
+        }
+
+        String avatarUrl = fileStorageService.storeUserAvatar(file);
 
         user.setAvatarUrl(avatarUrl);
 
@@ -235,62 +232,6 @@ public class UserService {
     private User findActiveUserById(Long id) {
         return userRepository.findByIdAndActiveTrue(id)
                 .orElseThrow(() -> new IllegalArgumentException("Usuário não encontrado"));
-    }
-
-    private String storeAvatarFile(MultipartFile file, Long userId) {
-        validateAvatarFile(file);
-
-        String originalFilename = file.getOriginalFilename();
-        String extension = extractFileExtension(originalFilename);
-        String filename = "user-" + userId + "-" + UUID.randomUUID() + extension;
-
-        try {
-            Files.createDirectories(USER_AVATAR_UPLOAD_DIR);
-
-            Path destination = USER_AVATAR_UPLOAD_DIR.resolve(filename).normalize();
-
-            Files.copy(file.getInputStream(), destination, StandardCopyOption.REPLACE_EXISTING);
-
-            return "/uploads/users/avatars/" + filename;
-        } catch (IOException exception) {
-            throw new IllegalArgumentException("Não foi possível salvar a foto do usuário");
-        }
-    }
-
-    private void validateAvatarFile(MultipartFile file) {
-        if (file == null || file.isEmpty()) {
-            throw new IllegalArgumentException("Selecione uma imagem para enviar");
-        }
-
-        if (file.getSize() > MAX_AVATAR_SIZE_BYTES) {
-            throw new IllegalArgumentException("A imagem deve ter no máximo 5MB");
-        }
-
-        String contentType = file.getContentType();
-
-        if (contentType == null || !isAllowedAvatarContentType(contentType)) {
-            throw new IllegalArgumentException("Formato inválido. Envie JPG, PNG, WEBP ou GIF");
-        }
-    }
-
-    private boolean isAllowedAvatarContentType(String contentType) {
-        return contentType.equalsIgnoreCase("image/jpeg")
-                || contentType.equalsIgnoreCase("image/png")
-                || contentType.equalsIgnoreCase("image/webp")
-                || contentType.equalsIgnoreCase("image/gif");
-    }
-
-    private String extractFileExtension(String filename) {
-        if (filename == null || !filename.contains(".")) {
-            return ".jpg";
-        }
-
-        String extension = filename.substring(filename.lastIndexOf(".")).toLowerCase(Locale.ROOT);
-
-        return switch (extension) {
-            case ".jpg", ".jpeg", ".png", ".webp", ".gif" -> extension;
-            default -> ".jpg";
-        };
     }
 
     private Address getOrCreateAddress(User user) {

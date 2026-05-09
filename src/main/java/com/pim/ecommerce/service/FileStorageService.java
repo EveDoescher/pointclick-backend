@@ -56,6 +56,10 @@ public class FileStorageService {
         return uploadImage(file, "reviews", "avaliacao");
     }
 
+    public String storeUserAvatar(MultipartFile file) {
+        return uploadImage(file, "users/avatars", "avatar");
+    }
+
     public void deletePublicFile(String publicUrl) {
         if (publicUrl == null || publicUrl.isBlank()) {
             return;
